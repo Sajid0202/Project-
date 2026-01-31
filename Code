@@ -1,0 +1,777 @@
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+#include <ctype.h>
+
+#define MAX_ENTITIES 50
+#define DAYS 5
+#define SLOTS_PER_DAY 9
+#define TIME_START 8
+#define FILENAME "timetable_data.dat"
+
+// ========== STRUCTURES ==========
+
+typedef struct {
+    char fullName[50];
+    char code[10];
+    int capacity;
+    char type[20];
+    int occupied[DAYS][SLOTS_PER_DAY];
+} Classroom;
+
+typedef struct {
+    char fullName[50];
+    char code[10];
+    int seniority;
+    int maxWeeklyHours;
+    int currentWeeklyHours;
+    int available[DAYS][SLOTS_PER_DAY];
+    int preferred[DAYS][SLOTS_PER_DAY];
+} Teacher;
+
+typedef struct {
+    char title[50];
+    char code[10];
+    int credits;
+    int duration;
+    char roomType[20];
+    char teacher[10];
+} Course;
+
+typedef struct {
+    char name[20];
+    int studentCount;
+    char homeRoom[10];
+    int isDivided;
+    int parentIndex;
+} Section;
+
+typedef struct {
+    char section[20];
+    char course[10];
+    char teacher[10];
+    char room[10];
+    int day;
+    int slot;
+    int duration;
+    int isBooked;
+} TimeSlot;
+
+// ========== GLOBAL VARIABLES ==========
+
+Classroom rooms[MAX_ENTITIES];
+Teacher teachers[MAX_ENTITIES];
+Course courses[MAX_ENTITIES];
+Section sections[MAX_ENTITIES];
+TimeSlot timetable[MAX_ENTITIES * 10];
+
+int roomCount = 0;
+int teacherCount = 0;
+int courseCount = 0;
+int sectionCount = 0;
+int slotCount = 0;
+
+// ========== FUNCTION PROTOTYPES ==========
+
+// File operations
+void saveData();
+void loadData();
+
+// Add functions
+void addRoom();
+void addTeacher();
+void addCourse();
+void addSection();
+
+// Display functions
+void showMenu();
+void displaySectionSchedule();
+void displayTeacherSchedule();
+void displayRoomSchedule();
+void displayAllSchedules();
+
+// Schedule functions
+void createTimetable();
+int checkConflict(int secIndex, int crsIndex, int teachIndex, int roomIndex, int day, int start, int dur);
+int assignRoom(int secIndex, int crsIndex, int day, int slot, int dur);
+int assignTeacher(char* courseCode);
+void sortTeachersBySeniority();
+
+// Utility functions
+void clearBuffer();
+int findRoom(char* code);
+int findTeacher(char* code);
+int findCourse(char* code);
+int findSection(char* code);
+void exportToFile();
+
+// ========== MAIN FUNCTION ==========
+
+int main() {
+    loadData();
+    showMenu();
+    return 0;
+}
+
+// ========== FILE OPERATIONS ==========
+
+void saveData() {
+    FILE* file = fopen(FILENAME, "wb");
+    if (file == NULL) {
+        printf("Error: Cannot save data!\n");
+        return;
+    }
+    
+    fwrite(&roomCount, sizeof(int), 1, file);
+    fwrite(&teacherCount, sizeof(int), 1, file);
+    fwrite(&courseCount, sizeof(int), 1, file);
+    fwrite(&sectionCount, sizeof(int), 1, file);
+    fwrite(&slotCount, sizeof(int), 1, file);
+    
+    fwrite(rooms, sizeof(Classroom), roomCount, file);
+    fwrite(teachers, sizeof(Teacher), teacherCount, file);
+    fwrite(courses, sizeof(Course), courseCount, file);
+    fwrite(sections, sizeof(Section), sectionCount, file);
+    fwrite(timetable, sizeof(TimeSlot), slotCount, file);
+    
+    fclose(file);
+    printf("Data saved successfully!\n");
+}
+
+void loadData() {
+    FILE* file = fopen(FILENAME, "rb");
+    if (file == NULL) {
+        printf("No previous data found. Starting new.\n");
+        return;
+    }
+    
+    fread(&roomCount, sizeof(int), 1, file);
+    fread(&teacherCount, sizeof(int), 1, file);
+    fread(&courseCount, sizeof(int), 1, file);
+    fread(&sectionCount, sizeof(int), 1, file);
+    fread(&slotCount, sizeof(int), 1, file);
+    
+    fread(rooms, sizeof(Classroom), roomCount, file);
+    fread(teachers, sizeof(Teacher), teacherCount, file);
+    fread(courses, sizeof(Course), courseCount, file);
+    fread(sections, sizeof(Section), sectionCount, file);
+    fread(timetable, sizeof(TimeSlot), slotCount, file);
+    
+    fclose(file);
+    printf("Previous data loaded!\n");
+}
+
+// ========== MENU SYSTEM ==========
+
+void showMenu() {
+    int choice;
+    
+    while (1) {
+        printf("\n========== CLASS SCHEDULING SYSTEM ==========\n");
+        printf("1. Add Classroom\n");
+        printf("2. Add Teacher\n");
+        printf("3. Add Course\n");
+        printf("4. Add Section\n");
+        printf("5. Generate Timetable\n");
+        printf("6. View Schedules\n");
+        printf("7. Export to File\n");
+        printf("8. Save Current Data\n");
+        printf("0. Exit\n");
+        printf("--------------------------------------------\n");
+        printf("Choice: ");
+        
+        if (scanf("%d", &choice) != 1) {
+            clearBuffer();
+            printf("Invalid input! Please enter a number.\n");
+            continue;
+        }
+        clearBuffer();
+        
+        switch (choice) {
+            case 1: addRoom(); break;
+            case 2: addTeacher(); break;
+            case 3: addCourse(); break;
+            case 4: addSection(); break;
+            case 5: createTimetable(); break;
+            case 6: displayAllSchedules(); break;
+            case 7: exportToFile(); break;
+            case 8: saveData(); break;
+            case 0: 
+                saveData();
+                printf("Goodbye!\n");
+                exit(0);
+            default: printf("Invalid choice! Try again.\n");
+        }
+    }
+}
+
+// ========== ADD FUNCTIONS ==========
+
+void addRoom() {
+    if (roomCount >= MAX_ENTITIES) {
+        printf("Maximum classrooms reached!\n");
+        return;
+    }
+    
+    Classroom* r = &rooms[roomCount];
+    
+    printf("\n--- Add Classroom ---\n");
+    printf("Name: ");
+    fgets(r->fullName, 50, stdin);
+    r->fullName[strcspn(r->fullName, "\n")] = 0;
+    
+    printf("Code (e.g., CSE-101): ");
+    fgets(r->code, 10, stdin);
+    r->code[strcspn(r->code, "\n")] = 0;
+    
+    printf("Capacity: ");
+    scanf("%d", &r->capacity);
+    clearBuffer();
+    
+    printf("Type (Theory/Lab/General): ");
+    fgets(r->type, 20, stdin);
+    r->type[strcspn(r->type, "\n")] = 0;
+    
+    // Initialize occupancy
+    for (int d = 0; d < DAYS; d++) {
+        for (int s = 0; s < SLOTS_PER_DAY; s++) {
+            r->occupied[d][s] = 0;
+        }
+    }
+    
+    roomCount++;
+    printf("Classroom added successfully!\n");
+}
+
+void addTeacher() {
+    if (teacherCount >= MAX_ENTITIES) {
+        printf("Maximum teachers reached!\n");
+        return;
+    }
+    
+    Teacher* t = &teachers[teacherCount];
+    
+    printf("\n--- Add Teacher ---\n");
+    printf("Name: ");
+    fgets(t->fullName, 50, stdin);
+    t->fullName[strcspn(t->fullName, "\n")] = 0;
+    
+    printf("Code (e.g., T-101): ");
+    fgets(t->code, 10, stdin);
+    t->code[strcspn(t->code, "\n")] = 0;
+    
+    printf("Seniority (1-4 where 4 is highest): ");
+    scanf("%d", &t->seniority);
+    
+    printf("Max weekly hours: ");
+    scanf("%d", &t->maxWeeklyHours);
+    t->currentWeeklyHours = 0;
+    
+    clearBuffer();
+    
+    // Initialize availability
+    for (int d = 0; d < DAYS; d++) {
+        for (int s = 0; s < SLOTS_PER_DAY; s++) {
+            t->available[d][s] = 1;
+            t->preferred[d][s] = 0;
+        }
+    }
+    
+    teacherCount++;
+    printf("Teacher added successfully!\n");
+}
+
+void addCourse() {
+    if (courseCount >= MAX_ENTITIES) {
+        printf("Maximum courses reached!\n");
+        return;
+    }
+    
+    Course* c = &courses[courseCount];
+    
+    printf("\n--- Add Course ---\n");
+    printf("Title: ");
+    fgets(c->title, 50, stdin);
+    c->title[strcspn(c->title, "\n")] = 0;
+    
+    printf("Code (e.g., CSE-101): ");
+    fgets(c->code, 10, stdin);
+    c->code[strcspn(c->code, "\n")] = 0;
+    
+    printf("Credits: ");
+    scanf("%d", &c->credits);
+    
+    printf("Duration (1, 2, or 3 hours): ");
+    scanf("%d", &c->duration);
+    
+    clearBuffer();
+    
+    printf("Required room type: ");
+    fgets(c->roomType, 20, stdin);
+    c->roomType[strcspn(c->roomType, "\n")] = 0;
+    
+    strcpy(c->teacher, "NONE");
+    
+    courseCount++;
+    printf("Course added successfully!\n");
+}
+
+void addSection() {
+    if (sectionCount >= MAX_ENTITIES) {
+        printf("Maximum sections reached!\n");
+        return;
+    }
+    
+    Section* s = &sections[sectionCount];
+    
+    printf("\n--- Add Section ---\n");
+    printf("Name (e.g., CSE-A-2024): ");
+    fgets(s->name, 20, stdin);
+    s->name[strcspn(s->name, "\n")] = 0;
+    
+    printf("Number of students: ");
+    scanf("%d", &s->studentCount);
+    
+    clearBuffer();
+    
+    printf("Home classroom code: ");
+    fgets(s->homeRoom, 10, stdin);
+    s->homeRoom[strcspn(s->homeRoom, "\n")] = 0;
+    
+    printf("Is divided? (0=No, 1=Yes): ");
+    scanf("%d", &s->isDivided);
+    
+    if (s->isDivided) {
+        printf("Parent section index: ");
+        scanf("%d", &s->parentIndex);
+    } else {
+        s->parentIndex = -1;
+    }
+    
+    clearBuffer();
+    
+    sectionCount++;
+    printf("Section added successfully!\n");
+}
+
+// ========== SCHEDULING FUNCTIONS ==========
+
+int assignTeacher(char* courseCode) {
+    // Simple assignment - first available teacher
+    for (int i = 0; i < teacherCount; i++) {
+        if (teachers[i].currentWeeklyHours < teachers[i].maxWeeklyHours) {
+            // Update course teacher
+            for (int j = 0; j < courseCount; j++) {
+                if (strcmp(courses[j].code, courseCode) == 0) {
+                    strcpy(courses[j].teacher, teachers[i].code);
+                    return i;
+                }
+            }
+        }
+    }
+    return -1;
+}
+
+int assignRoom(int secIndex, int crsIndex, int day, int slot, int dur) {
+    Section* sec = &sections[secIndex];
+    Course* crs = &courses[crsIndex];
+    
+    // First try home room
+    int roomIdx = findRoom(sec->homeRoom);
+    if (roomIdx != -1) {
+        // Check if room type matches
+        if (strcmp(rooms[roomIdx].type, crs->roomType) == 0 || 
+            strcmp(crs->roomType, "General") == 0) {
+            
+            // Check capacity
+            if (rooms[roomIdx].capacity >= sec->studentCount) {
+                
+                // Check availability for duration
+                int available = 1;
+                for (int i = 0; i < dur; i++) {
+                    if (slot + i >= SLOTS_PER_DAY || rooms[roomIdx].occupied[day][slot + i]) {
+                        available = 0;
+                        break;
+                    }
+                }
+                
+                if (available) {
+                    return roomIdx;
+                }
+            }
+        }
+    }
+    
+    // Try other rooms
+    for (int i = 0; i < roomCount; i++) {
+        if (strcmp(rooms[i].type, crs->roomType) == 0 || 
+            strcmp(crs->roomType, "General") == 0) {
+            
+            if (rooms[i].capacity >= sec->studentCount) {
+                
+                int available = 1;
+                for (int j = 0; j < dur; j++) {
+                    if (slot + j >= SLOTS_PER_DAY || rooms[i].occupied[day][slot + j]) {
+                        available = 0;
+                        break;
+                    }
+                }
+                
+                if (available) {
+                    return i;
+                }
+            }
+        }
+    }
+    
+    return -1;
+}
+
+int checkConflict(int secIndex, int crsIndex, int teachIndex, int roomIndex, 
+                  int day, int start, int dur) {
+    
+    // Check teacher availability
+    for (int i = 0; i < dur; i++) {
+        if (start + i >= SLOTS_PER_DAY || !teachers[teachIndex].available[day][start + i]) {
+            return 1; // Teacher not available
+        }
+    }
+    
+    // Check room availability
+    for (int i = 0; i < dur; i++) {
+        if (start + i >= SLOTS_PER_DAY || rooms[roomIndex].occupied[day][start + i]) {
+            return 2; // Room occupied
+        }
+    }
+    
+    // Check teacher load
+    if (teachers[teachIndex].currentWeeklyHours + dur > teachers[teachIndex].maxWeeklyHours) {
+        return 3; // Exceeds teacher load
+    }
+    
+    // Check section conflicts
+    for (int i = 0; i < slotCount; i++) {
+        if (timetable[i].isBooked && strcmp(timetable[i].section, sections[secIndex].name) == 0) {
+            if (timetable[i].day == day) {
+                if (!(start + dur <= timetable[i].slot || start >= timetable[i].slot + timetable[i].duration)) {
+                    return 4; // Section conflict
+                }
+            }
+        }
+    }
+    
+    return 0; // No conflict
+}
+
+void sortTeachersBySeniority() {
+    // Simple bubble sort
+    for (int i = 0; i < teacherCount - 1; i++) {
+        for (int j = 0; j < teacherCount - i - 1; j++) {
+            if (teachers[j].seniority < teachers[j + 1].seniority) {
+                Teacher temp = teachers[j];
+                teachers[j] = teachers[j + 1];
+                teachers[j + 1] = temp;
+            }
+        }
+    }
+}
+
+void createTimetable() {
+    if (courseCount == 0 || teacherCount == 0 || roomCount == 0 || sectionCount == 0) {
+        printf("Please add all required data first!\n");
+        return;
+    }
+    
+    printf("\n--- Generating Timetable ---\n");
+    
+    // Reset
+    slotCount = 0;
+    for (int i = 0; i < MAX_ENTITIES * 10; i++) {
+        timetable[i].isBooked = 0;
+    }
+    
+    // Reset teachers and rooms
+    for (int i = 0; i < teacherCount; i++) {
+        teachers[i].currentWeeklyHours = 0;
+        for (int d = 0; d < DAYS; d++) {
+            for (int s = 0; s < SLOTS_PER_DAY; s++) {
+                teachers[i].available[d][s] = 1;
+            }
+        }
+    }
+    
+    for (int i = 0; i < roomCount; i++) {
+        for (int d = 0; d < DAYS; d++) {
+            for (int s = 0; s < SLOTS_PER_DAY; s++) {
+                rooms[i].occupied[d][s] = 0;
+            }
+        }
+    }
+    
+    sortTeachersBySeniority();
+    
+    int scheduled = 0;
+    
+    // Schedule each course for each main section
+    for (int sec = 0; sec < sectionCount; sec++) {
+        if (sections[sec].parentIndex != -1) continue;
+        
+        for (int crs = 0; crs < courseCount; crs++) {
+            int teacherIdx = assignTeacher(courses[crs].code);
+            if (teacherIdx == -1) {
+                printf("No teacher available for %s\n", courses[crs].code);
+                continue;
+            }
+            
+            int scheduledThis = 0;
+            
+            for (int day = 0; day < DAYS && !scheduledThis; day++) {
+                for (int slot = 0; slot <= SLOTS_PER_DAY - courses[crs].duration && !scheduledThis; slot++) {
+                    
+                    int roomIdx = assignRoom(sec, crs, day, slot, courses[crs].duration);
+                    
+                    if (roomIdx != -1) {
+                        int conflict = checkConflict(sec, crs, teacherIdx, roomIdx, 
+                                                    day, slot, courses[crs].duration);
+                        
+                        if (conflict == 0) {
+                            // Book the slot
+                            TimeSlot* ts = &timetable[slotCount];
+                            strcpy(ts->section, sections[sec].name);
+                            strcpy(ts->course, courses[crs].code);
+                            strcpy(ts->teacher, teachers[teacherIdx].code);
+                            strcpy(ts->room, rooms[roomIdx].code);
+                            ts->day = day;
+                            ts->slot = slot;
+                            ts->duration = courses[crs].duration;
+                            ts->isBooked = 1;
+                            
+                            // Update status
+                            teachers[teacherIdx].currentWeeklyHours += courses[crs].duration;
+                            for (int i = 0; i < courses[crs].duration; i++) {
+                                teachers[teacherIdx].available[day][slot + i] = 0;
+                                rooms[roomIdx].occupied[day][slot + i] = 1;
+                            }
+                            
+                            slotCount++;
+                            scheduled++;
+                            scheduledThis = 1;
+                            
+                            printf("Scheduled: %s for %s\n", courses[crs].code, sections[sec].name);
+                        }
+                    }
+                }
+            }
+            
+            if (!scheduledThis) {
+                printf("Could not schedule %s for section %s\n", 
+                       courses[crs].code, sections[sec].name);
+            }
+        }
+    }
+    
+    printf("\nTimetable generated successfully!\n");
+    printf("Total sessions scheduled: %d\n", scheduled);
+}
+
+// ========== DISPLAY FUNCTIONS ==========
+
+void displaySectionSchedule() {
+    char secCode[20];
+    printf("Enter section code: ");
+    fgets(secCode, 20, stdin);
+    secCode[strcspn(secCode, "\n")] = 0;
+    
+    printf("\n=== Schedule for Section: %s ===\n", secCode);
+    printf("Day       Time      Course     Teacher  Room\n");
+    printf("-------------------------------------------\n");
+    
+    char* days[] = {"Sat", "Sun", "Mon", "Tue", "Wed"};
+    
+    for (int i = 0; i < slotCount; i++) {
+        if (timetable[i].isBooked && strcmp(timetable[i].section, secCode) == 0) {
+            int start = TIME_START + timetable[i].slot;
+            int end = start + timetable[i].duration;
+            
+            printf("%-9s %02d:00-%02d:00 %-9s %-8s %-10s\n",
+                   days[timetable[i].day],
+                   start, end,
+                   timetable[i].course,
+                   timetable[i].teacher,
+                   timetable[i].room);
+        }
+    }
+}
+
+void displayTeacherSchedule() {
+    char teachCode[20];
+    printf("Enter teacher code: ");
+    fgets(teachCode, 20, stdin);
+    teachCode[strcspn(teachCode, "\n")] = 0;
+    
+    printf("\n=== Schedule for Teacher: %s ===\n", teachCode);
+    printf("Day       Time      Course     Section   Room\n");
+    printf("--------------------------------------------\n");
+    
+    char* days[] = {"Sat", "Sun", "Mon", "Tue", "Wed"};
+    
+    for (int i = 0; i < slotCount; i++) {
+        if (timetable[i].isBooked && strcmp(timetable[i].teacher, teachCode) == 0) {
+            int start = TIME_START + timetable[i].slot;
+            int end = start + timetable[i].duration;
+            
+            printf("%-9s %02d:00-%02d:00 %-9s %-9s %-10s\n",
+                   days[timetable[i].day],
+                   start, end,
+                   timetable[i].course,
+                   timetable[i].section,
+                   timetable[i].room);
+        }
+    }
+}
+
+void displayRoomSchedule() {
+    char roomCode[20];
+    printf("Enter room code: ");
+    fgets(roomCode, 20, stdin);
+    roomCode[strcspn(roomCode, "\n")] = 0;
+    
+    printf("\n=== Schedule for Room: %s ===\n", roomCode);
+    printf("Day       Time      Course     Section   Teacher\n");
+    printf("-----------------------------------------------\n");
+    
+    char* days[] = {"Sat", "Sun", "Mon", "Tue", "Wed"};
+    
+    for (int i = 0; i < slotCount; i++) {
+        if (timetable[i].isBooked && strcmp(timetable[i].room, roomCode) == 0) {
+            int start = TIME_START + timetable[i].slot;
+            int end = start + timetable[i].duration;
+            
+            printf("%-9s %02d:00-%02d:00 %-9s %-9s %-8s\n",
+                   days[timetable[i].day],
+                   start, end,
+                   timetable[i].course,
+                   timetable[i].section,
+                   timetable[i].teacher);
+        }
+    }
+}
+
+void displayAllSchedules() {
+    int choice;
+    
+    while (1) {
+        printf("\n--- View Schedules ---\n");
+        printf("1. Section Schedule\n");
+        printf("2. Teacher Schedule\n");
+        printf("3. Room Schedule\n");
+        printf("4. All Booked Slots\n");
+        printf("0. Back\n");
+        printf("Choice: ");
+        
+        scanf("%d", &choice);
+        clearBuffer();
+        
+        if (choice == 0) break;
+        
+        switch (choice) {
+            case 1: displaySectionSchedule(); break;
+            case 2: displayTeacherSchedule(); break;
+            case 3: displayRoomSchedule(); break;
+            case 4:
+                printf("\n=== All Booked Time Slots ===\n");
+                for (int i = 0; i < slotCount; i++) {
+                    if (timetable[i].isBooked) {
+                        printf("%d. %s - %s (Sec: %s, Teach: %s, Room: %s)\n",
+                               i + 1, timetable[i].course, timetable[i].section,
+                               timetable[i].teacher, timetable[i].room);
+                    }
+                }
+                break;
+            default: printf("Invalid choice!\n");
+        }
+    }
+}
+
+// ========== EXPORT FUNCTION ==========
+
+void exportToFile() {
+    FILE* file = fopen("timetable_export.txt", "w");
+    if (file == NULL) {
+        printf("Cannot create export file!\n");
+        return;
+    }
+    
+    fprintf(file, "========== FINAL TIMETABLE ==========\n\n");
+    
+    char* days[] = {"Saturday", "Sunday", "Monday", "Tuesday", "Wednesday"};
+    
+    // Export by section
+    for (int sec = 0; sec < sectionCount; sec++) {
+        if (sections[sec].parentIndex == -1) {
+            fprintf(file, "\n--- Section: %s ---\n", sections[sec].name);
+            fprintf(file, "Day        Time       Course     Teacher  Room\n");
+            fprintf(file, "--------------------------------------------\n");
+            
+            for (int i = 0; i < slotCount; i++) {
+                if (timetable[i].isBooked && strcmp(timetable[i].section, sections[sec].name) == 0) {
+                    int start = TIME_START + timetable[i].slot;
+                    int end = start + timetable[i].duration;
+                    
+                    fprintf(file, "%-10s %02d:00-%02d:00 %-9s %-8s %-10s\n",
+                           days[timetable[i].day],
+                           start, end,
+                           timetable[i].course,
+                           timetable[i].teacher,
+                           timetable[i].room);
+                }
+            }
+        }
+    }
+    
+    fclose(file);
+    printf("Timetable exported to 'timetable_export.txt'\n");
+}
+
+// ========== UTILITY FUNCTIONS ==========
+
+int findRoom(char* code) {
+    for (int i = 0; i < roomCount; i++) {
+        if (strcmp(rooms[i].code, code) == 0) {
+            return i;
+        }
+    }
+    return -1;
+}
+
+int findTeacher(char* code) {
+    for (int i = 0; i < teacherCount; i++) {
+        if (strcmp(teachers[i].code, code) == 0) {
+            return i;
+        }
+    }
+    return -1;
+}
+
+int findCourse(char* code) {
+    for (int i = 0; i < courseCount; i++) {
+        if (strcmp(courses[i].code, code) == 0) {
+            return i;
+        }
+    }
+    return -1;
+}
+
+int findSection(char* code) {
+    for (int i = 0; i < sectionCount; i++) {
+        if (strcmp(sections[i].name, code) == 0) {
+            return i;
+        }
+    }
+    return -1;
+}
+
+void clearBuffer() {
+    int c;
+    while ((c = getchar()) != '\n' && c != EOF);
+}
